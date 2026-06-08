@@ -5,8 +5,8 @@ struct CircleOfFifthsMenuBarApp: App {
     var body: some Scene {
         MenuBarExtra("Circle of Fifths", systemImage: "music.note") {
             ContentView()
-                .frame(width: 560, height: 650)
-                .padding(14)
+                .frame(width: 500, height: 560)
+                .padding(10)
         }
         .menuBarExtraStyle(.window)
     }

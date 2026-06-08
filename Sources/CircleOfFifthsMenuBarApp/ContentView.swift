@@ -5,9 +5,10 @@ struct ContentView: View {
     @State private var selectedMode: KeyMode = .major
     @State private var playbackType: ChordPlaybackType = .triad
     @StateObject private var tonePlayer = TonePlayer()
+    private let denseColumns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             header
             controls
 
@@ -26,21 +27,18 @@ struct ContentView: View {
                     playCurrentTonicChord()
                 }
             )
-            .frame(height: 280)
+            .frame(height: 220)
 
             PianoKeyboardStrip(highlightedNotes: selectedProfile.notes(for: selectedMode))
-                .frame(height: 86)
+                .frame(height: 62)
 
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    infoRow(title: "Selected key", value: "\(selectedProfile.displayKey(for: selectedMode)) \(selectedMode.rawValue)")
-                    infoRow(title: "Key signature", value: selectedProfile.keySignature)
-                    infoRow(title: "Relative", value: selectedProfile.relativeInfo(for: selectedMode))
-
-                    section(title: "Notes in scale", items: [selectedProfile.notes(for: selectedMode).joined(separator: " - ")])
-                    section(title: "Common chords", items: selectedProfile.commonChords(for: selectedMode))
+                VStack(alignment: .leading, spacing: 8) {
+                    compactInfoGrid
+                    compactSection(title: "Notes in scale", items: [selectedProfile.notes(for: selectedMode).joined(separator: " - ")], columns: 1)
+                    compactSection(title: "Common chords", items: selectedProfile.commonChords(for: selectedMode), columns: 1)
                     interactiveChordSection(
                         title: "Diatonic triads",
                         entries: selectedProfile.diatonicTriadEntries(for: selectedMode)
@@ -66,24 +64,24 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text("Circle of Fifths")
-                .font(.title2.weight(.semibold))
+                .font(.title3.weight(.semibold))
             Text("Click keys on the wheel to hear chords and inspect scales, harmony, and progressions.")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
         }
     }
 
     private var controls: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Picker("Mode", selection: $selectedMode) {
                 ForEach(KeyMode.allCases, id: \.self) { mode in
                     Text(mode.rawValue).tag(mode)
                 }
             }
             .pickerStyle(.menu)
-            .frame(maxWidth: 170)
+            .frame(maxWidth: 150)
 
             Picker("Playback", selection: $playbackType) {
                 ForEach(ChordPlaybackType.allCases, id: \.self) { kind in
@@ -96,7 +94,9 @@ struct ContentView: View {
                 playCurrentTonicChord()
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
+        .controlSize(.small)
     }
 
     private func infoRow(title: String, value: String) -> some View {
@@ -123,26 +123,74 @@ struct ContentView: View {
         }
     }
 
-    private func interactiveChordSection(title: String, entries: [ChordEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.headline)
+    private var compactInfoGrid: some View {
+        LazyVGrid(columns: denseColumns, alignment: .leading, spacing: 6) {
+            compactInfoCell(title: "Selected", value: "\(selectedProfile.displayKey(for: selectedMode)) \(selectedMode.rawValue)")
+            compactInfoCell(title: "Relative", value: selectedProfile.relativeInfo(for: selectedMode))
+            compactInfoCell(title: "Signature", value: selectedProfile.keySignature)
+            compactInfoCell(title: "Playback", value: playbackType.rawValue)
+        }
+    }
 
-            ForEach(entries, id: \.self) { entry in
-                Button {
-                    tonePlayer.playChord(root: entry.root, quality: entry.quality)
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("\(entry.numeral): \(entry.symbol)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(.caption)
-                            .foregroundStyle(.accent)
-                    }
+    private func compactInfoCell(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func compactSection(title: String, items: [String], columns: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            let sectionColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: max(1, columns))
+            LazyVGrid(columns: sectionColumns, alignment: .leading, spacing: 4) {
+                ForEach(items, id: \.self) { item in
+                    Text(item)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
-                .contentShape(Rectangle())
+            }
+        }
+    }
+
+    private func interactiveChordSection(title: String, entries: [ChordEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            LazyVGrid(columns: denseColumns, alignment: .leading, spacing: 4) {
+                ForEach(entries, id: \.self) { entry in
+                    Button {
+                        tonePlayer.playChord(root: entry.root, quality: entry.quality)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(entry.numeral): \(entry.symbol)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "speaker.wave.2.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.accent)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                }
             }
         }
     }
@@ -202,7 +250,7 @@ struct CircleWheelView: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(selectedProfile.displayKey(for: selectedMode))
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
                 }
                 .padding(8)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
