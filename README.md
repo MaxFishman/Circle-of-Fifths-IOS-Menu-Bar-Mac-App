@@ -55,3 +55,6 @@ When you click the menu bar icon, a popover opens with an interactive circle:
 - Add piano-keyboard visualization and clickable scale notes
 - Add optional triad/arpeggio playback (instead of tonic only)
 - Add user presets (favorite keys and progressions)
+
+
+Max Fishman 2026
