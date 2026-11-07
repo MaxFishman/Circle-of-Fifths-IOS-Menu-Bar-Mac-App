@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 final class TonePlayer: ObservableObject {
+    @Published private(set) var error: String?
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private let sampleRate: Double = 44_100
@@ -15,20 +16,48 @@ final class TonePlayer: ObservableObject {
         do {
             try engine.start()
         } catch {
-            print("Audio engine failed to start: \(error)")
+            self.error = "Audio engine failed to start: \(error.localizedDescription)"
         }
     }
 
-    func playChord(root: String, quality: ChordQuality) {
-        guard let rootFrequency = frequency(for: root) else { return }
-        let frequencies = quality.intervals.map { rootFrequency * pow(2.0, Double($0) / 12.0) }
-        let buffer = makeChordBuffer(frequencies: frequencies, duration: 0.5)
+    func playNote(_ note: String) {
+        playSequence([(note, [0])], arpeggio: false)
+    }
 
-        player.stop()
-        player.scheduleBuffer(buffer, at: nil, options: .interrupts)
+    func playChord(root: String, quality: ChordQuality, arpeggio: Bool = false) {
+        playSequence([(root, quality.intervals)], arpeggio: arpeggio)
+    }
 
-        if !player.isPlaying {
+    func playProgression(_ chords: [ChordEntry], arpeggio: Bool) {
+        playSequence(chords.map { ($0.root, $0.quality.intervals) }, arpeggio: arpeggio)
+    }
+
+    private func playSequence(_ chords: [(String, [Int])], arpeggio: Bool) {
+        var buffers: [AVAudioPCMBuffer] = []
+        for (root, intervals) in chords {
+            guard let rootFrequency = frequency(for: root) else {
+                error = "Cannot play the note \(root)."
+                return
+            }
+            let frequencies = intervals.map { rootFrequency * pow(2.0, Double($0) / 12.0) }
+            if arpeggio {
+                buffers.append(contentsOf: frequencies.map { makeChordBuffer(frequencies: [$0], duration: 0.22) })
+            } else {
+                buffers.append(makeChordBuffer(frequencies: frequencies, duration: 0.5))
+            }
+        }
+        do {
+            if !engine.isRunning {
+                try engine.start()
+            }
+            player.stop()
+            for buffer in buffers {
+                player.scheduleBuffer(buffer)
+            }
             player.play()
+            error = nil
+        } catch {
+            self.error = "Audio engine failed to start: \(error.localizedDescription)"
         }
     }
 
@@ -57,35 +86,7 @@ final class TonePlayer: ObservableObject {
     }
 
     private func frequency(for note: String) -> Double? {
-        let aliases: [String: String] = [
-            "Db": "C#",
-            "Eb": "D#",
-            "Gb": "F#",
-            "Ab": "G#",
-            "Bb": "A#",
-            "Cb": "B",
-            "Fb": "E",
-            "E#": "F",
-            "B#": "C"
-        ]
-
-        let clean = aliases[note] ?? note
-        let semitonesFromC4: [String: Int] = [
-            "C": 0,
-            "C#": 1,
-            "D": 2,
-            "D#": 3,
-            "E": 4,
-            "F": 5,
-            "F#": 6,
-            "G": 7,
-            "G#": 8,
-            "A": 9,
-            "A#": 10,
-            "B": 11
-        ]
-
-        guard let semitone = semitonesFromC4[clean] else { return nil }
+        guard let semitone = Note.pitchClass(note) else { return nil }
 
         let midi = 60 + semitone
         return 440.0 * pow(2.0, Double(midi - 69) / 12.0)

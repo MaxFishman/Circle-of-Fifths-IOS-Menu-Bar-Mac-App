@@ -1,6 +1,6 @@
 import Foundation
 
-enum KeyMode: String, CaseIterable {
+enum KeyMode: String, CaseIterable, Codable {
     case major = "Major"
     case naturalMinor = "Natural Minor"
     case harmonicMinor = "Harmonic Minor"
@@ -12,8 +12,34 @@ enum KeyMode: String, CaseIterable {
 }
 
 enum ChordPlaybackType: String, CaseIterable {
+    case tonic = "Tonic"
     case triad = "Triad"
     case seventh = "Seventh"
+    case arpeggio = "Arpeggio"
+}
+
+enum Note {
+    static func pitchClass(_ note: String) -> Int? {
+        guard let letter = note.first,
+              let natural = ["C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11][String(letter)]
+        else { return nil }
+        var pitch = natural
+        for accidental in note.dropFirst() {
+            switch accidental {
+            case "#": pitch += 1
+            case "b": pitch -= 1
+            default: return nil
+            }
+        }
+        return (pitch % 12 + 12) % 12
+    }
+
+    static func raised(_ note: String) -> String {
+        if note.hasSuffix("b") {
+            return String(note.dropLast())
+        }
+        return note + "#"
+    }
 }
 
 enum ChordQuality {
@@ -64,6 +90,16 @@ struct ChordEntry: Hashable {
     let quality: ChordQuality
 }
 
+struct Progression: Identifiable {
+    var id: String { name }
+    let name: String
+    let chords: [ChordEntry]
+
+    var description: String {
+        "\(name): \(chords.map(\.symbol).joined(separator: " - "))"
+    }
+}
+
 struct KeyProfile: Identifiable, Hashable {
     var id: String { majorKey }
 
@@ -107,40 +143,24 @@ struct KeyProfile: Identifiable, Hashable {
     }
 
     func commonChords(for mode: KeyMode) -> [String] {
-        let notes = notes(for: mode)
+        progressions(for: mode).map(\.description)
+    }
+
+    func progressions(for mode: KeyMode) -> [Progression] {
+        let definitions: [(String, [Int])]
         switch mode {
         case .major:
-            let one = chord(notes[0], quality: "")
-            let four = chord(notes[3], quality: "")
-            let five = chord(notes[4], quality: "")
-            let six = chord(notes[5], quality: "m")
-            return [
-                "I-IV-V: \(one) - \(four) - \(five)",
-                "ii-V-I: \(chord(notes[1], quality: "m")) - \(five) - \(one)",
-                "I-vi-IV-V: \(one) - \(six) - \(four) - \(five)"
-            ]
+            definitions = [("I-IV-V", [0, 3, 4]), ("ii-V-I", [1, 4, 0]), ("I-vi-IV-V", [0, 5, 3, 4])]
         case .naturalMinor:
-            let one = chord(notes[0], quality: "m")
-            let three = chord(notes[2], quality: "")
-            let six = chord(notes[5], quality: "")
-            let seven = chord(notes[6], quality: "")
-            return [
-                "i-VI-III-VII: \(one) - \(six) - \(three) - \(seven)",
-                "i-iv-v: \(one) - \(chord(notes[3], quality: "m")) - \(chord(notes[4], quality: "m"))",
-                "i-VII-VI-VII: \(one) - \(seven) - \(six) - \(seven)"
-            ]
+            definitions = [("i-VI-III-VII", [0, 5, 2, 6]), ("i-iv-v", [0, 3, 4]), ("i-VII-VI-VII", [0, 6, 5, 6])]
         case .harmonicMinor:
-            return [
-                "i-iv-V: \(chord(notes[0], quality: "m")) - \(chord(notes[3], quality: "m")) - \(chord(notes[4], quality: ""))",
-                "ii dim-V-i: \(chord(notes[1], quality: "dim")) - \(chord(notes[4], quality: "")) - \(chord(notes[0], quality: "m"))",
-                "i-VI-III+: \(chord(notes[0], quality: "m")) - \(chord(notes[5], quality: "")) - \(chord(notes[2], quality: "+"))"
-            ]
+            definitions = [("i-iv-V", [0, 3, 4]), ("ii dim-V-i", [1, 4, 0]), ("i-VI-III+", [0, 5, 2])]
         case .melodicMinor:
-            return [
-                "i-IV-V: \(chord(notes[0], quality: "m")) - \(chord(notes[3], quality: "")) - \(chord(notes[4], quality: ""))",
-                "ii-V-i: \(chord(notes[1], quality: "m")) - \(chord(notes[4], quality: "")) - \(chord(notes[0], quality: "m"))",
-                "i-III+-VI dim: \(chord(notes[0], quality: "m")) - \(chord(notes[2], quality: "+")) - \(chord(notes[5], quality: "dim"))"
-            ]
+            definitions = [("i-IV-V", [0, 3, 4]), ("ii-V-i", [1, 4, 0]), ("i-III+-VI dim", [0, 2, 5])]
+        }
+        let triads = diatonicTriadEntries(for: mode)
+        return definitions.map { definition in
+            Progression(name: definition.0, chords: definition.1.map { triads[$0] })
         }
     }
 
@@ -234,7 +254,7 @@ struct KeyProfile: Identifiable, Hashable {
         case .melodicMinor:
             return [
                 entry("imMaj7", notes[0], .minorMajor7),
-                entry("ii7", notes[1], .dominant7),
+                entry("iim7", notes[1], .minor7),
                 entry("III+maj7", notes[2], .augmentedMajor7),
                 entry("IV7", notes[3], .dominant7),
                 entry("V7", notes[4], .dominant7),
@@ -247,18 +267,14 @@ struct KeyProfile: Identifiable, Hashable {
     func tonicChordQuality(for mode: KeyMode, playback: ChordPlaybackType) -> ChordQuality {
         switch mode {
         case .major:
-            return playback == .triad ? .major : .major7
+            return playback == .seventh ? .major7 : .major
         case .naturalMinor:
-            return playback == .triad ? .minor : .minor7
+            return playback == .seventh ? .minor7 : .minor
         case .harmonicMinor:
-            return playback == .triad ? .minor : .minorMajor7
+            return playback == .seventh ? .minorMajor7 : .minor
         case .melodicMinor:
-            return playback == .triad ? .minor : .minorMajor7
+            return playback == .seventh ? .minorMajor7 : .minor
         }
-    }
-
-    private func chord(_ root: String, quality: String) -> String {
-        return "\(root)\(quality)"
     }
 
     private func entry(_ numeral: String, _ root: String, _ quality: ChordQuality) -> ChordEntry {
@@ -294,62 +310,17 @@ struct KeyProfile: Identifiable, Hashable {
 
     private func raisedMinorScale(raiseSixth: Bool, raiseSeventh: Bool) -> [String] {
         var result = naturalMinorScale
-        let shouldPreferFlats = majorKey.contains("b") || keySignature.contains("flat")
-
         if raiseSixth, result.count > 5 {
-            result[5] = raisedNote(result[5], preferFlats: shouldPreferFlats)
+            result[5] = Note.raised(result[5])
         }
 
         if raiseSeventh, result.count > 6 {
-            result[6] = raisedNote(result[6], preferFlats: shouldPreferFlats)
+            result[6] = Note.raised(result[6])
         }
 
         return result
     }
 
-    private func raisedNote(_ note: String, preferFlats: Bool) -> String {
-        guard let pc = pitchClass(for: note) else { return note }
-        return noteName(for: (pc + 1) % 12, preferFlats: preferFlats)
-    }
-
-    private func pitchClass(for note: String) -> Int? {
-        let normalized = note.replacingOccurrences(of: "m", with: "")
-        let aliases: [String: String] = [
-            "Db": "C#",
-            "Eb": "D#",
-            "Gb": "F#",
-            "Ab": "G#",
-            "Bb": "A#",
-            "Cb": "B",
-            "Fb": "E",
-            "E#": "F",
-            "B#": "C"
-        ]
-
-        let clean = aliases[normalized] ?? normalized
-        let semitonesFromC: [String: Int] = [
-            "C": 0,
-            "C#": 1,
-            "D": 2,
-            "D#": 3,
-            "E": 4,
-            "F": 5,
-            "F#": 6,
-            "G": 7,
-            "G#": 8,
-            "A": 9,
-            "A#": 10,
-            "B": 11
-        ]
-
-        return semitonesFromC[clean]
-    }
-
-    private func noteName(for pitchClass: Int, preferFlats: Bool) -> String {
-        let sharpNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        let flatNames = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
-        return (preferFlats ? flatNames : sharpNames)[pitchClass]
-    }
 }
 
 enum TheoryData {

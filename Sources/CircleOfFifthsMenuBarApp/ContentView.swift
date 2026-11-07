@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var selectedMode: KeyMode = .major
     @State private var playbackType: ChordPlaybackType = .triad
     @StateObject private var tonePlayer = TonePlayer()
+    @StateObject private var favorites = FavoritesStore()
     private let denseColumns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
 
     var body: some View {
@@ -29,16 +30,25 @@ struct ContentView: View {
             )
             .frame(height: 220)
 
-            PianoKeyboardStrip(highlightedNotes: selectedProfile.notes(for: selectedMode))
-                .frame(height: 62)
+            PianoKeyboardStrip(highlightedNotes: selectedProfile.notes(for: selectedMode)) { note in
+                tonePlayer.playNote(note)
+            }
+            .frame(height: 62)
 
             Divider()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     compactInfoGrid
-                    compactSection(title: "Notes in scale", items: [selectedProfile.notes(for: selectedMode).joined(separator: " - ")], columns: 1)
-                    compactSection(title: "Common chords", items: selectedProfile.commonChords(for: selectedMode), columns: 1)
+                    if let error = tonePlayer.error {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    if let error = favorites.error {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    scaleNotesSection
+                    progressionsSection
+                    favoritesSection
                     interactiveChordSection(
                         title: "Diatonic triads",
                         entries: selectedProfile.diatonicTriadEntries(for: selectedMode)
@@ -55,12 +65,6 @@ struct ContentView: View {
         .onAppear {
             playCurrentTonicChord()
         }
-        .onChange(of: playbackType) {
-            playCurrentTonicChord()
-        }
-        .onChange(of: selectedMode) {
-            playCurrentTonicChord()
-        }
     }
 
     private var header: some View {
@@ -75,7 +79,10 @@ struct ContentView: View {
 
     private var controls: some View {
         HStack(spacing: 8) {
-            Picker("Mode", selection: $selectedMode) {
+            Picker("Mode", selection: Binding(
+                get: { selectedMode },
+                set: { selectedMode = $0; playCurrentTonicChord() }
+            )) {
                 ForEach(KeyMode.allCases, id: \.self) { mode in
                     Text(mode.rawValue).tag(mode)
                 }
@@ -83,44 +90,31 @@ struct ContentView: View {
             .pickerStyle(.menu)
             .frame(maxWidth: 150)
 
-            Picker("Playback", selection: $playbackType) {
+            Picker("Playback", selection: Binding(
+                get: { playbackType },
+                set: { playbackType = $0; playCurrentTonicChord() }
+            )) {
                 ForEach(ChordPlaybackType.allCases, id: \.self) { kind in
                     Text(kind.rawValue).tag(kind)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             Button("Play") {
                 playCurrentTonicChord()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
+
+            Button {
+                favorites.toggle(profile: selectedProfile, mode: selectedMode)
+            } label: {
+                Image(systemName: favorites.contains(profile: selectedProfile, mode: selectedMode) ? "star.fill" : "star")
+            }
+            .help("Toggle favorite key")
+            .accessibilityLabel("Toggle favorite key")
         }
         .controlSize(.small)
-    }
-
-    private func infoRow(title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title + ":")
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 108, alignment: .leading)
-            Text(value)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-        }
-    }
-
-    private func section(title: String, items: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.headline)
-
-            ForEach(items, id: \.self) { item in
-                Text("- " + item)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 
     private var compactInfoGrid: some View {
@@ -147,18 +141,82 @@ struct ContentView: View {
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func compactSection(title: String, items: [String], columns: Int) -> some View {
+    private var scaleNotesSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
+            Text("Notes in scale").font(.subheadline.weight(.semibold))
+            HStack {
+                ForEach(selectedProfile.notes(for: selectedMode), id: \.self) { note in
+                    Button(note) { tonePlayer.playNote(note) }
+                        .controlSize(.small)
+                        .accessibilityLabel("Play \(note)")
+                }
+            }
+        }
+    }
 
-            let sectionColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: max(1, columns))
-            LazyVGrid(columns: sectionColumns, alignment: .leading, spacing: 4) {
-                ForEach(items, id: \.self) { item in
-                    Text(item)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private var progressionsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Common progressions").font(.subheadline.weight(.semibold))
+            ForEach(selectedProfile.progressions(for: selectedMode)) { progression in
+                HStack {
+                    Button {
+                        tonePlayer.playProgression(progression.chords, arpeggio: playbackType == .arpeggio)
+                    } label: {
+                        Label(progression.description, systemImage: "play.fill")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        favorites.toggle(profile: selectedProfile, mode: selectedMode, progressionID: progression.id)
+                    } label: {
+                        Image(systemName: favorites.contains(profile: selectedProfile, mode: selectedMode, progressionID: progression.id) ? "star.fill" : "star")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Toggle favorite progression")
+                    .accessibilityLabel("Toggle favorite \(progression.name) progression")
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private var favoritesSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Favorites").font(.subheadline.weight(.semibold))
+            if favorites.favorites.isEmpty {
+                Text("Use the stars to save keys and progressions.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(favorites.favorites) { favorite in
+                if let profile = TheoryData.circle.first(where: { $0.majorKey == favorite.majorKey }) {
+                    HStack {
+                        Button {
+                            selectedProfile = profile
+                            selectedMode = favorite.mode
+                            if let id = favorite.progressionID,
+                               let progression = profile.progressions(for: favorite.mode).first(where: { $0.id == id }) {
+                                tonePlayer.playProgression(progression.chords, arpeggio: playbackType == .arpeggio)
+                            } else {
+                                playCurrentTonicChord()
+                            }
+                        } label: {
+                            let name = favorite.progressionID.flatMap { id in
+                                profile.progressions(for: favorite.mode).first { $0.id == id }?.name
+                            }
+                            Text("\(profile.displayKey(for: favorite.mode)) \(favorite.mode.rawValue)\(name.map { " - \($0)" } ?? "")")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        Button {
+                            favorites.remove(favorite)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove favorite")
+                        .accessibilityLabel("Remove favorite")
+                    }
+                    .font(.caption)
                 }
             }
         }
@@ -172,7 +230,7 @@ struct ContentView: View {
             LazyVGrid(columns: denseColumns, alignment: .leading, spacing: 4) {
                 ForEach(entries, id: \.self) { entry in
                     Button {
-                        tonePlayer.playChord(root: entry.root, quality: entry.quality)
+                        tonePlayer.playChord(root: entry.root, quality: entry.quality, arpeggio: playbackType == .arpeggio)
                     } label: {
                         HStack(spacing: 4) {
                             Text("\(entry.numeral): \(entry.symbol)")
@@ -197,8 +255,12 @@ struct ContentView: View {
 
     private func playCurrentTonicChord() {
         let root = selectedProfile.tonic(for: selectedMode)
+        if playbackType == .tonic {
+            tonePlayer.playNote(root)
+            return
+        }
         let quality = selectedProfile.tonicChordQuality(for: selectedMode, playback: playbackType)
-        tonePlayer.playChord(root: root, quality: quality)
+        tonePlayer.playChord(root: root, quality: quality, arpeggio: playbackType == .arpeggio)
     }
 }
 
@@ -290,6 +352,12 @@ struct CircleWheelView: View {
 
 struct PianoKeyboardStrip: View {
     let highlightedNotes: [String]
+    let onPlay: (String) -> Void
+
+    init(highlightedNotes: [String], onPlay: @escaping (String) -> Void) {
+        self.highlightedNotes = highlightedNotes
+        self.onPlay = onPlay
+    }
 
     private let whiteKeys = ["C", "D", "E", "F", "G", "A", "B"]
     private let blackKeys: [(note: String, indexAfterWhite: Int)] = [
@@ -308,26 +376,46 @@ struct PianoKeyboardStrip: View {
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 0) {
                     ForEach(whiteKeys, id: \.self) { key in
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(isHighlighted(key) ? Color.accentColor.opacity(0.25) : Color.white)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .stroke(Color.black.opacity(0.18), lineWidth: 1)
-                            )
-                            .overlay(alignment: .bottom) {
-                                Text(key)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.bottom, 2)
-                            }
+                        Button {
+                            onPlay(displayName(for: key))
+                        } label: {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(isHighlighted(key) ? Color.accentColor.opacity(0.25) : Color.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .stroke(Color.black.opacity(0.18), lineWidth: 1)
+                                )
+                                .overlay(alignment: .bottom) {
+                                    Text(displayName(for: key))
+                                        .font(.caption2)
+                                        .foregroundStyle(.black)
+                                        .padding(.bottom, 2)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Play \(displayName(for: key))")
                     }
                 }
 
                 ForEach(blackKeys, id: \.note) { black in
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(isHighlighted(black.note) ? Color.accentColor : Color.black.opacity(0.84))
-                        .frame(width: blackWidth, height: proxy.size.height * 0.6)
-                        .offset(x: whiteWidth * CGFloat(black.indexAfterWhite + 1) - blackWidth / 2)
+                    Button {
+                        onPlay(displayName(for: black.note))
+                    } label: {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(isHighlighted(black.note) ? Color.accentColor : Color.black.opacity(0.84))
+                            .overlay(alignment: .bottom) {
+                                if isHighlighted(black.note) {
+                                    Text(displayName(for: black.note))
+                                        .font(.caption2)
+                                        .foregroundStyle(.white)
+                                        .padding(.bottom, 2)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: blackWidth, height: proxy.size.height * 0.6)
+                    .offset(x: whiteWidth * CGFloat(black.indexAfterWhite + 1) - blackWidth / 2)
+                    .accessibilityLabel("Play \(displayName(for: black.note))")
                 }
             }
         }
@@ -335,40 +423,12 @@ struct PianoKeyboardStrip: View {
     }
 
     private func isHighlighted(_ note: String) -> Bool {
-        let highlightedPitchClasses = Set(highlightedNotes.compactMap(pitchClass(for:)))
-        guard let candidate = pitchClass(for: note) else { return false }
+        let highlightedPitchClasses = Set(highlightedNotes.compactMap(Note.pitchClass))
+        guard let candidate = Note.pitchClass(note) else { return false }
         return highlightedPitchClasses.contains(candidate)
     }
 
-    private func pitchClass(for note: String) -> Int? {
-        let aliases: [String: String] = [
-            "Db": "C#",
-            "Eb": "D#",
-            "Gb": "F#",
-            "Ab": "G#",
-            "Bb": "A#",
-            "Cb": "B",
-            "Fb": "E",
-            "E#": "F",
-            "B#": "C"
-        ]
-
-        let clean = aliases[note.replacingOccurrences(of: "m", with: "")] ?? note.replacingOccurrences(of: "m", with: "")
-        let semitones: [String: Int] = [
-            "C": 0,
-            "C#": 1,
-            "D": 2,
-            "D#": 3,
-            "E": 4,
-            "F": 5,
-            "F#": 6,
-            "G": 7,
-            "G#": 8,
-            "A": 9,
-            "A#": 10,
-            "B": 11
-        ]
-
-        return semitones[clean]
+    private func displayName(for note: String) -> String {
+        highlightedNotes.first { Note.pitchClass($0) == Note.pitchClass(note) } ?? note
     }
 }
