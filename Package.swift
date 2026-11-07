@@ -16,6 +16,10 @@ let package = Package(
         .executableTarget(
             name: "CircleOfFifthsMenuBarApp",
             path: "Sources/CircleOfFifthsMenuBarApp"
+        ),
+        .testTarget(
+            name: "CircleOfFifthsMenuBarAppTests",
+            dependencies: ["CircleOfFifthsMenuBarApp"]
         )
     ]
 )
